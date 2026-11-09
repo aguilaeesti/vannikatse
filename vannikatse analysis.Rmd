@@ -1,0 +1,345 @@
+---
+title: "Vannikatse analysis"
+author: "Xenia"
+date: "2026-10-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+#knitr::opts_knit$set(root.dir = rprojroot::find_rstudio_root_file())
+```
+
+
+```{r libraries, include=FALSE, echo=FALSE}
+# Data management
+library(tidyverse)
+library(stringr)
+library(dplyr)
+
+# Plotting
+library(ggplot2)
+library(patchwork)
+library(scales)
+
+
+library(igraph) # for family tree
+library(ggraph)
+
+# Models
+library(lme4)
+library(lmerTest) 
+library(DHARMa)
+library(performance) # binomial GLM assumption 
+library(glmmTMB)
+# Structural Equation Modelling 
+# library(piecewiseSEM) # Warning: package ‘piecewiseSEM’ is not available for this version of R
+library(DiagrammeR) # plotting of SEM
+
+```
+
+## Data cleaning
+```{r read data, include=FALSE, echo=FALSE}
+df_raw <- read.csv("data_vannikatse.csv", sep=";", dec=",")
+
+```
+
+```{r remove individuals, include=TRUE, echo=FALSE}
+df_clean <- df_raw %>%
+  filter(ID != "A2") %>%    # removed both, too close and not distinguishable. They are too strong a case for dormancy, and possibly wrong.
+  filter(ID != "A3") %>%
+  filter(ID != "A23") %>%   # remove it, because of close distance to A25
+  filter(ID != "A23a10") %>%
+  filter(ID != "A7") %>%    # removed it together with A9, as they are interchangeable = individual profile too unsure
+  filter(ID != "A7a3") %>%
+  filter(ID != "A9") %>%
+  filter(ID != "A9a2") %>%
+  filter(ID != "A9b8") %>%
+  filter(ID != "C6a8") %>% # removed, as it was a strange case. Growing from the same place as C6 in 2026, and flowering in the first year (as did C6 in 2026). Could be C6 growing two flowering stalks, or C5 which disappeared only in 2025, or a strange flowering sidebulb. Not possible to explain.
+  mutate(
+    year_num   = as.numeric(year),
+    ID         = as.character(ID),
+    leaf_count = rowSums(!is.na(select(., h1, h2, h3, h4, h5))),
+    flowering  = as.integer(!is.na(genh)),
+    h1_cm      = h1 / 10
+  )
+
+# str(df_clean)
+
+# check for possible overlaps in sidebulbs and motherplants:
+# A7 A7a3 with A9 and A9a2 and A9b8
+
+# df_raw[df_raw$ID == c("A7","A7a3"),]
+# df_raw[df_raw$ID == c("A9b8"),]
+
+```
+
+
+
+## Tray maps
+
+```{r read data trays, include=FALSE,echo=FALSE}
+
+# load the data
+df <- df_clean %>%
+  mutate(
+    tray   = factor(str_extract(ID, "^[A-Za-z]"),level=c("C","B","A")),   # extract tray column from the ID column 
+    ID = str_extract(ID, "(?<=^[A-Za-z]).+") # extract the ID (numbers 1-30 in the first year, letters a-b... for side bulbs belonging to the motherplant)
+  ) %>%
+  mutate(year=as.factor(year),
+         ID=as.factor(ID))
+```
+
+### Presence Absence Map
+```{r PresAbsMap, fig.width=8,fig.height=16, error=FALSE, warning=F, echo=FALSE}
+# make a presence/absence column that I'll call "pa"
+df$pa <- ifelse(is.na(df$h1),0,1) # 0 means, that plant is absence; 1, that it is present
+#df$tray <- factor(df$tray,level = c("C","B","A"))
+# 3 maps using ggplot and facet_grid(year~tray)
+ggplot(df,aes(x = x, y = y, colour = factor(pa)))+
+  geom_point()+
+  geom_text(aes(label=as.character(ID)),hjust=-0.35, vjust=0.35)+
+  scale_color_manual(values = c("red", "darkgreen"), 
+                     labels = c("Absent","Present"),
+                     name = "")+
+  xlim(450, 20) + ylim(30, 650) +
+  facet_grid(year~tray)+
+  theme_bw()+
+   theme(
+    plot.title     = element_text(face = "bold", size = 14),
+    strip.text     = element_text(face = "bold", size = 11),
+    legend.position = "bottom"
+  )
+
+```
+
+### Sidebulb production Map
+
+```{r sidebulbMap, fig.width=8,fig.height=16, error=FALSE, warning=FALSE,echo=FALSE}
+# 0 means no sidebulbs, 1 means at least one sidebulb produced
+df$sidebulb_pa <- ifelse(is.na(df$`sidebulb_nr`) | df$`sidebulb_nr` == 0, 0, 1)
+
+ggplot(df, aes(x = x, y=y, colour = factor(sidebulb_pa))) +
+  geom_point() + 
+  geom_text(aes(label = ID), hjust = -0.35, vjust = 0.35) +
+  xlim(450, 0) + ylim(30, 650) +
+  facet_grid(year~tray) +
+  scale_color_manual(values = c("grey60", "darkorange"), 
+                     labels = c("No sidebulbs", "Produced sidebulbs"),
+                     name = "")  +
+  theme_bw() +
+  theme(
+    plot.title     = element_text(face = "bold", size = 14),
+    strip.text     = element_text(face = "bold", size = 11),
+    legend.position = "bottom"
+  )
+
+```
+
+### Life stages Map
+
+```{r, echo=FALSE,include=FALSE}
+df_spatial_combined <- df_raw %>%
+  mutate(
+    year_num = as.numeric(year),
+    raw_tray = str_extract(ID, "^[A-Za-z]+"),
+    combined_tray = factor(str_remove(raw_tray, "X$"),levels = c("C","B","A")), # Merges AX -> A, BX -> B, CX -> C
+    leaf_count = rowSums(!is.na(select(., h1, h2, h3, h4, h5))),
+    flowering = as.integer(!is.na(genh) | (!is.na(flower_nr) & flower_nr > 0))
+  ) %>%
+  arrange(ID, year_num) %>%
+  group_by(ID) %>%
+  mutate(
+    leaves_before = lag(cumany(leaf_count > 0), default = FALSE),
+    leaves_after  = rev(lag(cumany(rev(leaf_count > 0)), default = FALSE)),
+    
+    state = case_when(
+      flowering == 1 ~ "Flowering",
+      leaf_count >= 1 ~ "Vegetative",
+      
+      # Dormancy conditions
+      leaf_count == 0 & leaves_before & leaves_after ~ "Dormant",
+      leaf_count == 0 & leaves_after ~ "Dormant", # That's for A24 which didn't appear the 1st year, counted it as dormant, hoping it's not a sidebulb that appeared
+      
+      # Death condition
+      leaf_count == 0 & lead(leaf_count, 1)== 0 & lead(leaf_count, 2) == 0 & !leaves_after~ "Dead", 
+      
+      # The rest will be unknown
+      leaf_count == 0 ~ "Unknown"
+    )
+  ) %>%
+  # Let's mark the rest of the years of death as "dead" too
+  mutate(
+    dead_from_here = cumany(state == "Dead"),
+    state = if_else(dead_from_here, "Dead", state)
+  ) %>%
+  # Fill coordinates across missing years so spatial positions remain visible
+  fill(x, y, .direction = "downup") %>%
+  ungroup() %>%
+  filter(!is.na(x), !is.na(y)) %>%
+  mutate(
+    state = factor(state, levels = c("Vegetative", "Flowering", "Dormant", "Dead", "Unknown")),
+    combined_tray  = paste("Combined Tray", combined_tray)
+  )
+
+```
+
+```{r lifestages map,fig.width=8, fig.height=16}
+# Multi-year spatial plot across combined trays
+ggplot(df_spatial_combined, aes(x = x, y = y, color = state, shape = state)) +
+  geom_point(aes(size = state), alpha = 0.85) +
+  scale_color_manual(values = c(
+    "Vegetative" = "forestgreen",
+    "Flowering"  = "magenta3",
+    "Dormant"    = "orange2",
+    "Dead"       = "red4",
+    "Unknown"    = "black"
+  )) +
+  scale_shape_manual(values = c(
+    "Vegetative" = 16,  
+    "Flowering"  = 8,   
+    "Dormant"    = 18,  
+    "Dead"       = 15,
+    "Unknown"    = 17
+  )) +
+  scale_size_manual(values = c(
+    "Vegetative" = 2.2,
+    "Flowering"  = 3.0,
+    "Dormant"    = 2.5,
+    "Dead"       = 2.5,
+    "Unknown"    = 2.5
+  )) +
+  facet_grid(year ~ combined_tray, scales = "free") +
+  labs(
+    title = "Spatial Tray Maps (2022–2026)",
+    color = "Plant Status",
+    shape = "Plant Status",
+    size  = "Plant Status"
+  ) +
+  xlim(450, 0) + ylim(30, 650) +
+  theme_bw() +
+  theme(
+    plot.title     = element_text(face = "bold", size = 14),
+    strip.text     = element_text(face = "bold", size = 11),
+    legend.position = "bottom"
+  )
+```
+
+## Individual profile function
+```{r individual profile function, echo=FALSE}
+library(tidyverse)
+library(scales)
+# 
+# df_clean <- read_csv2("data_vannikatse.csv") %>%
+#   mutate(
+#     year_num   = as.numeric(year),
+#     ID         = as.character(ID),
+#     leaf_count = rowSums(!is.na(select(., h1, h2, h3, h4, h5))),
+#     flowering  = as.integer(!is.na(genh)),
+#     h1_cm      = h1 / 10
+#   )
+
+# global limits from the entire dataset to prevent axis distortion
+MAX_LEAF_COUNT <- max(df_clean$leaf_count, na.rm = TRUE) 
+MAX_HEIGHT_CM  <- max(df_clean$h1_cm, na.rm = TRUE)      
+SCALE_FACTOR    <- MAX_HEIGHT_CM / MAX_LEAF_COUNT         
+
+plot_individual_profile <- function(plant_id, data = df_clean) {
+  
+  plant_data <- data %>% filter(ID == plant_id)
+  
+  if (nrow(plant_data) == 0) {
+    message(paste("Warning: Plant ID", plant_id, "not found in dataset"))
+    return(NULL)
+  }
+  
+  # ensuring all years (2022-2026) appear on the X axis, even if a sidebulb was absent in early years
+  all_years <- data.frame(year_num = seq(min(data$year_num), max(data$year_num), by = 1))
+  plant_data <- full_join(plant_data, all_years, by = "year_num") %>% 
+    arrange(year_num)
+  
+  # Non-NA height points for clean rendering
+  line_data <- plant_data %>% filter(!is.na(h1_cm))
+  
+  ggplot(plant_data, aes(x = year_num)) +
+    # Leaf count bar chart
+    geom_col(aes(y = leaf_count), fill = "seagreen3", alpha = 0.6, width = 0.4) +
+    # Height line and points (scaled using the global scale factor)
+    geom_line(data = line_data, aes(y = h1_cm / SCALE_FACTOR), color = "darkblue", linewidth = 1.2) +
+    geom_point(data = line_data, aes(y = h1_cm / SCALE_FACTOR), color = "darkblue", size = 3) +
+    # Width as comparison
+    geom_line(data = line_data, aes(y = w1/10), color = "blue", linewidth = 1, linetype = 2) + 
+    geom_point(data = line_data, aes(y = w1/10), color = "blue", size = 2) + 
+    
+    # Flowering markers
+    geom_point(
+      data = filter(plant_data, flowering == 1), 
+      aes(y = leaf_count + 0.3), 
+      color = "magenta3", 
+      shape = 8, 
+      size = 5
+    ) +    
+    # sidebulb point
+    geom_point(
+      data = filter(plant_data, is.na(`sidebulb_nr`) == FALSE),
+      aes(y = leaf_count + 0.5), 
+      color = "brown", 
+      shape = 9, 
+      size = 5
+    ) +
+    # Standardized axes across ALL individual graphs
+    scale_y_continuous(
+      name = "Leaf Count (Green Bars)",
+      limits = c(0, MAX_LEAF_COUNT + 1),
+      breaks = 0:MAX_LEAF_COUNT,
+      sec.axis = sec_axis(~ . * SCALE_FACTOR, name = "1st Leaf Height and width [cm] (Blue Line)")
+    ) +
+    scale_x_continuous(breaks = seq(min(data$year_num), max(data$year_num), by = 1)) +
+    labs(
+      title = paste("Individual Profile:", plant_id),
+      subtitle = "Asterisks (*) denote flowering years; blank years denote missing/dormant states",
+      x = "Year"
+    ) +
+    theme_bw() +
+    theme(
+      plot.title        = element_text(face = "bold", size = 13),
+      axis.title.y.right = element_text(color = "darkblue", face = "bold"),
+      axis.title.y.left  = element_text(color = "seagreen4", face = "bold")
+    )
+}
+
+```
+
+Possible application
+
+```{r Individual profile plot, fig.height=8, fig.width=10, echo=TRUE, warning=FALSE}
+# Example usage for a single graph:
+# plot_individual_profile("A9")
+# plot_individual_profile("A9a2")
+# plot_individual_profile("A9b8")
+# 
+# plot_individual_profile("A7")
+# plot_individual_profile("A7a3")
+
+
+# generating graphs for every individual plant & sidebulb
+
+# all_ids <- unique(na.omit(df_clean$ID))
+
+# saving all individual graphs to a PDF
+# pdf("OUTPUT/All_Individual_Plant_Profiles.pdf", width = 8, height = 5)
+# for (id in all_ids) {
+#  p <- plot_individual_profile(id, data = df_clean)
+#  if (!is.null(p)) print(p)
+# }
+# dev.off()
+```
+
+## Life stage development
+### Transition matrix
+
+```{r prepare data for transition matrix, echo = FALSE}
+
+
+```
+
