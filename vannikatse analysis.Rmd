@@ -337,3 +337,9 @@ Possible application
 
 ## Life stage development
 ### Transition matrix
+
+```{r prepare data for transition matrix, echo = FALSE}
+
+
+```
+

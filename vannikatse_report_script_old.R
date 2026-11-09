@@ -12,7 +12,7 @@ library(ggplot2)
 library(patchwork)
 
 df1 <- read_csv2("data_vannikatse.csv")
-
+# change
 # look into seeds
 df_26 <- df1 %>%
   filter(year=="2026")
