@@ -43,7 +43,7 @@ print(head(df1[df1$leaf4 == TRUE, ],20)) # NULL
 df1$leaf5 <- xor(is.na(df1$h5),is.na(df$w5)) | xor(is.na(df1$h5),is.na(df$l5))
 print(head(df1[df1$leaf5 == TRUE, ],20)) # NULL
 
-df1$flower <- xor(is.na(df1$flower_nr), is.na(df1$genh))
+df1$flower <- xor(is.na(df1$flower_len), is.na(df1$genh))
 df1[df1$flower == TRUE, ] # 2024 B30 missing Genh
 
 

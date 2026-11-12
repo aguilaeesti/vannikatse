@@ -48,13 +48,16 @@ df_raw <- read.csv("data_vannikatse.csv", sep=";", dec=",")
 df_clean <- df_raw %>%
   filter(ID != "A2") %>%    # removed both, too close and not distinguishable. They are too strong a case for dormancy, and possibly wrong.
   filter(ID != "A3") %>%
+  
   filter(ID != "A23") %>%   # remove it, because of close distance to A25
   filter(ID != "A23a10") %>%
+  
   filter(ID != "A7") %>%    # removed it together with A9, as they are interchangeable = individual profile too unsure
   filter(ID != "A7a3") %>%
   filter(ID != "A9") %>%
   filter(ID != "A9a2") %>%
   filter(ID != "A9b8") %>%
+  
   filter(ID != "C6a8") %>% # removed, as it was a strange case. Growing from the same place as C6 in 2026, and flowering in the first year (as did C6 in 2026). Could be C6 growing two flowering stalks, or C5 which disappeared only in 2025, or a strange flowering sidebulb. Not possible to explain.
   mutate(
     year_num   = as.numeric(year),
@@ -62,7 +65,21 @@ df_clean <- df_raw %>%
     leaf_count = rowSums(!is.na(select(., h1, h2, h3, h4, h5))),
     flowering  = as.integer(!is.na(genh)),
     h1_cm      = h1 / 10
-  )
+  ) %>%
+  mutate(
+    tray = str_extract(ID, "^[A-Za-z]"),                                    # extract tray letters A, B, C from the ID                                
+    tray = factor(tray),                                                    # factorize trays
+    year_num = as.numeric(year),                                            # add a numeric year column
+    year = factor(year),                                                    # factorize years
+    ID = factor(ID),                                                        # factorize IDs
+    leaf_count = rowSums(!is.na(select(., h1, h2, h3, h4, h5))),            # counts the number of leaf height measurements = nr of leaves
+    flowering = as.integer(!is.na(flower_len)),                             # assigns all individuals with flower_len value != 0
+    sidebulbs = ifelse(is.na(`sidebulb_nr`), 0, as.numeric(`sidebulb_nr`)), # assigns the number of new sidebulbs to each mature plant.
+    grew_sidebulbs = ifelse(sidebulbs > 0, 1, 0),                           # sidebulbs 1 0
+)
+
+
+
 
 # str(df_clean)
 
@@ -77,7 +94,6 @@ df_clean <- df_raw %>%
 
 
 ## Tray maps
-
 ```{r read data trays, include=FALSE,echo=FALSE}
 
 # load the data
@@ -88,7 +104,9 @@ df <- df_clean %>%
   ) %>%
   mutate(year=as.factor(year),
          ID=as.factor(ID))
+
 ```
+
 
 ### Presence Absence Map
 ```{r PresAbsMap, fig.width=8,fig.height=16, error=FALSE, warning=F, echo=FALSE}
@@ -113,8 +131,8 @@ ggplot(df,aes(x = x, y = y, colour = factor(pa)))+
 
 ```
 
-### Sidebulb production Map
 
+### Sidebulb production Map
 ```{r sidebulbMap, fig.width=8,fig.height=16, error=FALSE, warning=FALSE,echo=FALSE}
 # 0 means no sidebulbs, 1 means at least one sidebulb produced
 df$sidebulb_pa <- ifelse(is.na(df$`sidebulb_nr`) | df$`sidebulb_nr` == 0, 0, 1)
@@ -139,7 +157,7 @@ ggplot(df, aes(x = x, y=y, colour = factor(sidebulb_pa))) +
 ### Life stages Map
 
 ```{r, echo=FALSE,include=FALSE}
-df_spatial_combined <- df_raw %>%
+df_spatial_combined <- df_clean %>%
   mutate(
     year_num = as.numeric(year),
     raw_tray = str_extract(ID, "^[A-Za-z]+"),
@@ -314,19 +332,19 @@ Possible application
 
 ```{r Individual profile plot, fig.height=8, fig.width=10, echo=TRUE, warning=FALSE}
 # Example usage for a single graph:
-# plot_individual_profile("A9")
+# plot_individual_profile("A8")
 # plot_individual_profile("A9a2")
 # plot_individual_profile("A9b8")
 # 
 # plot_individual_profile("A7")
 # plot_individual_profile("A7a3")
 
-
-# generating graphs for every individual plant & sidebulb
-
+# 
+# # generating graphs for every individual plant & sidebulb
+# 
 # all_ids <- unique(na.omit(df_clean$ID))
-
-# saving all individual graphs to a PDF
+# 
+# # saving all individual graphs to a PDF
 # pdf("OUTPUT/All_Individual_Plant_Profiles.pdf", width = 8, height = 5)
 # for (id in all_ids) {
 #  p <- plot_individual_profile(id, data = df_clean)
@@ -346,38 +364,30 @@ library(dplyr)
 
 
 # Load and clean data
-df <- read_csv2("data_vannikatse.csv") %>%
-  mutate(
-    tray = str_extract(ID, "^[A-Za-z]"),
-    tray = factor(tray),
-    year_num = as.numeric(year),
-    year = factor(year),
-    ID = factor(ID),
-    leaf_count = rowSums(!is.na(select(., h1, h2, h3, h4, h5))),
-    flowering = as.integer(!is.na(genh)),
-    sidebulbs = ifelse(is.na(`sidebulb_nr`), 0, as.numeric(`sidebulb_nr`)),
-    grew_sidebulbs = ifelse(sidebulbs > 0, 1, 0),
-  ) %>%
+# Should I exclude all individuals that appear only one year - I guess yes, for the transition matrix. 
+df_trans <- df_clean %>%
   arrange(ID, year_num) %>%
   group_by(ID) %>%
+  # filter out all that appear only once
+  filter(n() > 1) %>%
   mutate(
-    leaves_before = lag(cumany(leaf_count > 0), default = FALSE),
-    leaves_after  = rev(lag(cumany(rev(leaf_count > 0)), default = FALSE)),
+    leaves_before = lag(cumany(leaf_count > 0), default = FALSE),           # to set the dormancy 
+    leaves_after  = rev(lag(cumany(rev(leaf_count > 0)), default = FALSE)), # to set the dormancy
     
     state = case_when(
-      flowering == 1 ~ "flowering",
-      leaf_count == 1 ~ "1-leaf",
-      leaf_count >= 2 ~ "vegetative",
+      flowering == 1 ~ "flowering",                                         # define the stage of flowering (as flowers present)
+      leaf_count == 1 ~ "1-leaf",                                           # define the stage of 1-leaf (exactly 1 leaf)
+      leaf_count >= 2 ~ "vegetative",                                       # define the stage of vegetative (1+ leaf and not flowering)
       
       # Dormancy conditions
       leaf_count == 0 & leaves_before & leaves_after ~ "dormant",
-      leaf_count == 0 & leaves_after ~ "dormant", # That's for A24 which didn't appear the 1st year, counted it as dormant, hoping it's not a sidebulb that appeared
+      leaf_count == 0 & leaves_after ~ "dormant",                           # That's for A24 which didn't appear the 1st year, counted it as dormant, hoping it's not a sidebulb that appeared
       
-      # Death contiton
-      leaf_count == 0 & lead(leaf_count, 1)== 0 & lead(leaf_count, 2) == 0 & !leaves_after~ "dead", 
+      # Death condition
+      leaf_count == 0 & lead(leaf_count, 1)== 0 & lead(leaf_count, 2) == 0 & !leaves_after~ "dead", # any individual that is gone for longer than 1 year
       
       # The rest will be unknown
-      leaf_count == 0 ~ "unknown"
+      leaf_count == 0 ~ "unknown" # all individuals that we don't know if it is dead or dormant (last years)
     )
   ) %>%
   # Let's mark the rest of the years of death as "dead" too
@@ -391,13 +401,17 @@ df <- read_csv2("data_vannikatse.csv") %>%
 
 
 # Transition pairs t-> t1
-transitions_1 <- df %>%
+# we loose two years of transitions (2021 - 2022. But we know this!) It only doesn't give too much information... As they were all equalized by drying them.
+# add initial stage to the individuals
+
+# and 2026 - next year. Yeah, we cannot know this!
+transitions_1 <- df_trans %>%
   arrange(ID, year) %>%
   group_by(ID) %>%
   mutate(
     # Adding current and following state
-    state_t = state,
-    state_t1 = lead(state)
+    state_t = state,       # state of the previous year
+    state_t1 = lead(state) # state of the current year
   ) %>%
   # We can only keep the pairs where we know both the start and end state 
   # Let's also exclude the dead and unknown states
@@ -446,7 +460,7 @@ transition_matrix <- transition_matrix %>%
 
 
 ggplot(transition_matrix, aes(x = state_t1, y = state_t, fill = probability)) +
-  geom_tile(color = "white", size = 0.5) +
+  geom_tile(color = "white", linewidth = 0.5) +
   # adding the probabilities inside the squares
   geom_text(aes(label = sprintf("%.1f", probability*100)), # sprintf("%.1f", probability) rounds to exactly two decimals
             color = "black", size = 5) +
@@ -465,12 +479,15 @@ ggplot(transition_matrix, aes(x = state_t1, y = state_t, fill = probability)) +
     axis.text = element_text(size = 10)
   )
 
+# count of different stages
 df %>%
   group_by(state) %>%
-  summarise(kokku = n())
+  summarise(sum = n())
 
+# 3-leaved, but non-flowering individuals
 df %>%
   filter(state == "vegetative", leaf_count > 2) %>%
-  select(ID, leaf_count)
+  select(ID, leaf_count, year)
+
 ```
 
