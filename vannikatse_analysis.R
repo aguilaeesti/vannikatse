@@ -112,6 +112,7 @@ transitions_1 <- df_trans %>%
          # !state_t1 %in% c("unknown", "dead")) %>%
   ungroup()
 
+#write.csv(transitions_1,"trans.csv")
 
 # Calculating transition probabilities
 transition_matrix <- transitions_1 %>%
@@ -192,17 +193,16 @@ g <- graph_from_data_frame(edges) # using igraph to turn the transition matrix i
 E(g)$weight <- edges$percent
 
 # simple plot 
-plot(g)
+#plot(g)
 
 # pretty diagramme function
 diagramPlot <- function(g) {plot.igraph(
   g,
   main = "State transition diagram",
-  
-  margin = c(0.3,0.1,0.3,0.1),
+  margin = c(0.3,0.3,0.3,0.3),
   
   # vertices (tips of the graph)
-  vertex.size = 55,
+  vertex.size = 65,
   #vertex.color = alpha(c("palegreen", "#636363", "brown",
                    #"#b641b8", "#DADADA", "palegreen4"),alpha=0.5), # incl dead and unknowns
   vertex.color = alpha(c("palegreen", "brown",
@@ -213,40 +213,32 @@ diagramPlot <- function(g) {plot.igraph(
   
   # edges and arrows
   edge.width = E(g)$percent/10+1,
-  edge.color = "grey70",
-  edge.arrow.size = 1.2,
+  edge.color = alpha("grey70",alpha = 0.5),
+  edge.arrow.size = E(g)$percent/100+1,
   edge.curved = 0.3,
   
   # labels
-  edge.label = paste0(round(E(g)$percent,1), "%"),
+  edge.label = paste0(round(E(g)$percent,0), "%"),
   edge.label.cex = 1.4,
-  edge.label.color = "grey20",
-  edge.label.dist = 10,
+  edge.label.color = "grey10",
+  edge.label.font = 2, # bold
   
   #layout
-  #layout = coords
   layout =  layout_in_circle(g, order = V(g)[c(3,2,1,4)]) # c(top, right, left, bottom) 1 = 1-leaf, 2 = dormant, 3 = vegetative, 4 = flowering
+  #layout = layout_in_circle(g) # incl dead and unknowns 
 )
 }
 
 
-diagramPlot(g1)
-
 # pretty, incl dead and unknown
-diagramPlot(g)
+# diagramPlot(g)
 
 # pretty, excl unknown and dead
 edges1 <- edges[edges$to!="unknown" & edges$to !="dead",]
 g1 <- graph_from_data_frame(edges1) # using igraph to turn the transition matrix into IGRAPH object
-# 
-# coords <- layout_as_tree(
-#   g1,
-#   root = match("dormant", V(g1)$name),
-#   mode = "out"
-# )
-# idx <- match(c("1-leaf","vegetative", "flowering"), V(g1)$name)
-# coords[idx, ] <- coords[rev(idx), ]
 
-
+# remove '#' to save file into OUTPUT folder
+#png(filename = "OUTPUT/stateTransitionDiagramme.png", width = 500,height = 550)
 diagramPlot(g1)
+#dev.off()
 

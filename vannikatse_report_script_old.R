@@ -1992,7 +1992,6 @@ transition_matrix <- transitions %>%
   ungroup()
 
 
-#install.packages("igraph")
 library(igraph)
 
 
@@ -2070,7 +2069,6 @@ transition_matrix <- transitions %>%
   ungroup()
 
 
-#install.packages("igraph")
 library(igraph)
 
 
@@ -2101,15 +2099,16 @@ plot(
   vertex.label.color = "black",
   
   # edges and arrows
-  edge.width = E(g)$percent/6 + 1,
-  edge.color = "grey70",
-  edge.arrow.size = 0.2,
-  edge.curved = 0.2,
+   edge.width = E(g)$percent/6 + 1,
+   edge.color = "grey70",
+   edge.arrow.size = 2,
+   edge.curved = 0.2,
   
   # labels
   edge.label = paste0(round(E(g)$percent,1), "%"),
-  edge.label.cex = 0.9,
+  edge.label.cex = 1.4,
   edge.label.color = "grey20",
+  edge.label.bg = "blue",
   
   # layout
   layout =  layout_in_circle(g),

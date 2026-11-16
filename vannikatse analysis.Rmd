@@ -342,10 +342,9 @@ Possible application
 # 
 # # generating graphs for every individual plant & sidebulb
 # 
-# all_ids <- unique(na.omit(df_clean$ID))
-# 
-# # saving all individual graphs to a PDF
-# pdf("OUTPUT/All_Individual_Plant_Profiles.pdf", width = 8, height = 5)
+# all_ids <- unique(df_clean$ID[df_clean$motherplant == 0])
+# # # saving all individual graphs to a PDF
+# pdf("OUTPUT/All_Individual_Plant_Profiles_sidebulbs.pdf", width = 8, height = 5)
 # for (id in all_ids) {
 #  p <- plot_individual_profile(id, data = df_clean)
 #  if (!is.null(p)) print(p)
@@ -370,6 +369,8 @@ df_trans <- df_clean %>%
   group_by(ID) %>%
   # filter out all that appear only once
   filter(n() > 1) %>%
+  # filter out all sidebulbs
+  filter(motherplant == 1) %>%
   mutate(
     leaves_before = lag(cumany(leaf_count > 0), default = FALSE),           # to set the dormancy 
     leaves_after  = rev(lag(cumany(rev(leaf_count > 0)), default = FALSE)), # to set the dormancy
@@ -403,8 +404,7 @@ df_trans <- df_clean %>%
 # Transition pairs t-> t1
 # we loose two years of transitions (2021 - 2022. But we know this!) It only doesn't give too much information... As they were all equalized by drying them.
 # add initial stage to the individuals
-
-# and 2026 - next year. Yeah, we cannot know this!
+# and 2026 - 2027. Yeah, we cannot know this
 transitions_1 <- df_trans %>%
   arrange(ID, year) %>%
   group_by(ID) %>%
@@ -428,7 +428,7 @@ transition_matrix <- transitions_1 %>%
   mutate(probability = n / sum(n)) %>%
   ungroup()
 
-
+table(df_trans$ID,df_trans$state)
 ```
 
 ```{r plot transition matrix}
